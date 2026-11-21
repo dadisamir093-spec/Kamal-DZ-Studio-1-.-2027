@@ -14,6 +14,8 @@ import com.google.firebase.ai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private const val BACKEND_URL = "https://kamal-dz-studio-1---2027.faycallakal17.workers.dev"
+
 object GeminiStudioService {
 
     private const val TAG = "GeminiStudioService"
@@ -151,7 +153,7 @@ object GeminiStudioService {
     suspend fun fetchDailyQuotaInfo(context: Context): Result<QuotaInfo> {
         return withContext(Dispatchers.IO) {
             try {
-                val url = java.net.URL("http://127.0.0.1:3000/ai/quota-info")
+                val url = java.net.URL("$BACKEND_URL/ai/quota-info")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "GET"
                 connection.connectTimeout = 5000
@@ -195,7 +197,7 @@ object GeminiStudioService {
                     Log.w(TAG, "App Check token task failed: ${e.message}")
                 }
 
-                val url = java.net.URL("http://127.0.0.1:3000/ai/generate-image")
+                val url = java.net.URL("$BACKEND_URL/ai/generate-image")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
