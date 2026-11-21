@@ -1,0 +1,6 @@
+{
+  "name": "KAMAL DZ STUDIO 2027",
+  "description": "منصة سينمائية متكاملة بالذكاء الاصطناعي — استوديو متكامل لإنشاء الصور والفيديوهات والموسيقى والصوت والمونتاج وإدارة المهارات",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

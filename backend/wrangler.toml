@@ -1,0 +1,21 @@
+name = "kamal-dz-studio-1---2027"
+main = "src/index.ts"
+compatibility_date = "2024-03-29"
+
+[ai]
+binding = "AI"
+
+[durable_objects]
+bindings = [
+  { name = "QUOTA_MANAGER", class_name = "QuotaDurableObject" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QuotaDurableObject"]
+
+[vars]
+DAILY_NEURON_LIMIT = 10000
+FLUX_CONSERVATIVE_COST = 200
+FIREBASE_PROJECT_ID = "gen-lang-client-0522781997"
+FIREBASE_APP_ID = "1:794275757471:android:b2354bd07c0d8094a291aa"

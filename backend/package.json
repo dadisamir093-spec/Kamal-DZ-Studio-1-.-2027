@@ -1,0 +1,19 @@
+{
+  "name": "kamal-dz-studio-backend",
+  "version": "1.0.0",
+  "description": "Secure Zero-Cost Backend for Kamal DZ Studio 2027 using Cloudflare Workers, Durable Objects, SQLite, and Workers AI FLUX",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test --import tsx/esm src/tests.ts"
+  },
+  "dependencies": {
+    "jose": "^5.2.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240329.0",
+    "typescript": "^5.4.2",
+    "tsx": "^4.7.1"
+  }
+}
