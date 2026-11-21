@@ -24,11 +24,12 @@ export async function verifyAppCheckToken(
     return { isValid: false, error: 'Empty App Check token' };
   }
 
+  const projectNumber = expectedAppId.split(":")[1];
   try {
     // Verify JWT using Firebase App Check JWKS (RS256)
     const { payload } = await jwtVerify(token, JWKS, {
-      issuer: `https://firebaseappcheck.googleapis.com/${expectedProjectId}`,
-      audience: `projects/${expectedProjectId}`,
+      issuer: `https://firebaseappcheck.googleapis.com/${projectNumber}`,
+      audience: [`projects/${projectNumber}`, `projects/${expectedProjectId}`],
     });
 
     // Validate 'sub' claim matches Firebase App ID
