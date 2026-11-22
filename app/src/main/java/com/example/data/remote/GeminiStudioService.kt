@@ -189,12 +189,14 @@ object GeminiStudioService {
             try {
                 // Obtain App Check token string via Firebase App Check SDK
                 var appCheckToken: String? = null
+                var appCheckError: String? = null
                 try {
                     val tokenTask = com.google.firebase.appcheck.FirebaseAppCheck.getInstance().getAppCheckToken(false)
                     val tokenResult = com.google.android.gms.tasks.Tasks.await(tokenTask)
                     appCheckToken = tokenResult.token
                 } catch (e: Exception) {
                     Log.w(TAG, "App Check token task failed: ${e.message}")
+                    appCheckError = e.message ?: e.javaClass.simpleName
                 }
 
                 val url = java.net.URL("$BACKEND_URL/ai/generate-image")
@@ -239,7 +241,7 @@ object GeminiStudioService {
                     val errorMsg = try {
                         org.json.JSONObject(errorText).optString("error", errorText)
                     } catch (e: Exception) { errorText }
-                    Result.failure(Exception(errorMsg))
+                    Result.failure(Exception(if (appCheckToken.isNullOrEmpty()) "$errorMsg | سبب غياب التوكن: ${appCheckError ?: "التوكن فارغ"}" else errorMsg))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error calling Cloudflare Worker generate-image: ${e.message}", e)
