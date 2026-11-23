@@ -48,9 +48,21 @@ export default {
 
       try {
         const body = await request.json() as { prompt?: string; steps?: number; width?: number; height?: number };
-        const prompt = body.prompt;
+        let prompt = body.prompt;
         if (!prompt) {
           return Response.json({ error: 'Missing prompt for image generation' }, { status: 400, headers: corsHeaders });
+        }
+
+        // Translate Arabic prompts to English (FLUX understands English prompts)
+        if (/[\u0600-\u06FF]/.test(prompt)) {
+          try {
+            const tr: any = await env.AI.run('@cf/meta/m2m100-1.2b', { text: prompt, source_lang: 'ar', target_lang: 'en' });
+            if (tr && typeof tr.translated_text === 'string' && tr.translated_text.trim()) {
+              prompt = tr.translated_text.trim();
+            }
+          } catch (_e) {
+            // keep the original prompt if translation fails
+          }
         }
 
         // Dynamic cost calculation for FLUX.1 [schnell] based on official Cloudflare pricing:
