@@ -290,6 +290,7 @@ fun GenerationStudioScreen(
                     )
             )
 
+            if (currentSlot.mode != "توليد الصور") {
             // Play Button Overlay
             Box(
                 modifier = Modifier
@@ -344,6 +345,7 @@ fun GenerationStudioScreen(
                         color = CyanAccent
                     )
                 }
+            }
             }
         }
 
