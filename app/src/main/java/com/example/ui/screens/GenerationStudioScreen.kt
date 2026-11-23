@@ -669,6 +669,18 @@ fun GenerationStudioScreen(
             }
         }
 
+        if (!currentSlot.isGenerating && currentSlot.statusMessage.startsWith("❌")) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(SecondaryPanels)
+                    .padding(12.dp)
+            ) {
+                Text(text = currentSlot.statusMessage, fontSize = 11.sp, color = PrimaryText)
+            }
+        }
+
         // Cloudflare Workers AI Daily Quota Badge
         Box(
             modifier = Modifier
