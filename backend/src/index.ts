@@ -83,9 +83,7 @@ export default {
         try {
           imageResult = await env.AI.run('@cf/black-forest-labs/flux-1-schnell', {
             prompt: prompt,
-            num_steps: reqSteps,
-            width: reqWidth,
-            height: reqHeight,
+            steps: reqSteps,
           });
         } catch (aiErr: any) {
           const errMsg = aiErr.message || '';
