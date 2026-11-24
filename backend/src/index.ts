@@ -167,6 +167,11 @@ export default {
     }
 
     if (path === '/ai/reset-quota') {
+      // Disabled unless an ADMIN_TOKEN secret is configured and supplied in X-Admin-Token
+      const adminToken = (env as any).ADMIN_TOKEN;
+      if (!adminToken || request.headers.get('X-Admin-Token') !== adminToken) {
+        return new Response('Not found', { status: 404, headers: corsHeaders });
+      }
       const doId = env.QUOTA_MANAGER.idFromName('global_quota_manager');
       const stub = env.QUOTA_MANAGER.get(doId);
       const res = await stub.fetch(new Request('https://do/reset', { method: 'POST' }));
