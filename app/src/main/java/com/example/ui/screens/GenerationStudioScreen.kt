@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
+import com.example.util.ImageExport
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -101,6 +106,22 @@ fun GenerationStudioScreen(
         }
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+    fun saveNow() {
+        val path = currentSlot.resultImageFile ?: return
+        exportMessage = ImageExport.saveToGallery(context, java.io.File(path)).fold(
+            onSuccess = { "✅ تم الحفظ في المعرض: $it" },
+            onFailure = { "❌ فشل الحفظ: ${it.message ?: it.javaClass.simpleName}" }
+        )
+    }
+    val storagePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) saveNow()
+        else exportMessage = "❌ فشل الحفظ: لم تُمنح صلاحية التخزين المطلوبة على Android 9 وما قبله"
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -134,11 +155,6 @@ fun GenerationStudioScreen(
                             .clip(RoundedCornerShape(8.dp))
                             .border(0.5.dp, CyanAccent.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                             .background(DarkPanels)
-                            .clickable {
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            }
                             .testTag("slot_generated_image"),
                         contentAlignment = Alignment.Center
                     ) {
@@ -149,17 +165,10 @@ fun GenerationStudioScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
                             )
-                        } else if (currentSlot.referenceImageUri != null) {
-                            AsyncImage(
-                                model = currentSlot.referenceImageUri,
-                                contentDescription = "الصورة المولدة",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Add,
-                                contentDescription = "اختيار صورة مرجعية",
+                                contentDescription = "الصورة المولدة",
                                 tint = CyanAccent,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -352,6 +361,30 @@ fun GenerationStudioScreen(
             }
         }
 
+        if (currentSlot.hasResult && currentSlot.resultImageFile != null) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                                != PackageManager.PERMISSION_GRANTED
+                        ) storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        else saveNow()
+                    },
+                    modifier = Modifier.weight(1f).testTag("save_to_gallery_button")
+                ) { Text("💾 حفظ في المعرض", fontSize = 12.sp) }
+                Button(
+                    onClick = {
+                        ImageExport.share(context, java.io.File(currentSlot.resultImageFile!!)).onFailure {
+                            exportMessage = "❌ فشلت المشاركة: ${it.message ?: it.javaClass.simpleName}"
+                        }
+                    },
+                    modifier = Modifier.weight(1f).testTag("share_image_button")
+                ) { Text("📤 مشاركة", fontSize = 12.sp) }
+            }
+            exportMessage?.let { Text(it, fontSize = 11.sp, color = PrimaryText) }
+        }
+
         // Mode Selector Chips ("توليد الصور", "صورة إلى فيديو", "نص إلى فيديو")
         val modes = listOf("توليد الصور", "صورة إلى فيديو", "نص إلى فيديو")
         Row(
@@ -379,6 +412,19 @@ fun GenerationStudioScreen(
                 }
             }
         }
+
+        if (currentSlot.mode != "توليد الصور") {
+            Text(
+                "⚠️ هذا الوضع غير متاح حاليًا: لا يوجد نموذج مجاني متصل لتوليد الفيديو. استخدم «توليد الصور».",
+                fontSize = 11.sp,
+                color = SecondaryText
+            )
+        }
+        Text(
+            "الصورة المرجعية وتوليد صورة من صورة غير متاحين حاليًا؛ التوليد من النص فقط.",
+            fontSize = 10.sp,
+            color = SecondaryText
+        )
 
         // Prompt Input Card
         Box(
@@ -705,7 +751,7 @@ fun GenerationStudioScreen(
         // Primary Action Button: "✨ إنشاء الآن" (matches screenshot)
         Button(
             onClick = { viewModel.startGeneration() },
-            enabled = !currentSlot.isGenerating,
+            enabled = !currentSlot.isGenerating && currentSlot.mode == "توليد الصور",
             colors = ButtonDefaults.buttonColors(
                 containerColor = ElectricBlue,
                 disabledContainerColor = ElectricBlue.copy(alpha = 0.5f)

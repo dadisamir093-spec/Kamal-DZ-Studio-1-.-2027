@@ -244,9 +244,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             if (currentSlot.mode == "توليد الصور") {
                 val workingMsg = "توليد حقيقي قيد التنفيذ: App Check ثم Cloudflare Worker ثم FLUX.1 [schnell]..."
                 if (isSlot1) {
-                    _slot1State.value = _slot1State.value.copy(isGenerating = true, progress = 0f, hasResult = false, statusMessage = workingMsg)
+                    _slot1State.value = _slot1State.value.copy(isGenerating = true, progress = 0f, hasResult = false, resultImageFile = null, statusMessage = workingMsg)
                 } else {
-                    _slot2State.value = _slot2State.value.copy(isGenerating = true, progress = 0f, hasResult = false, statusMessage = workingMsg)
+                    _slot2State.value = _slot2State.value.copy(isGenerating = true, progress = 0f, hasResult = false, resultImageFile = null, statusMessage = workingMsg)
                 }
 
                 val result = com.example.data.remote.GeminiStudioService.generateImageWithCloudflareWorker(
