@@ -8,6 +8,30 @@ type VerifyFn = typeof verifyAppCheckToken;
 
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 const MAX_PROMPT_LENGTH = 2000;
+export const FINAL_PROMPT_HEADER_MAX_CHARS = 500;
+
+// Replaces m2m100 translation: rewrites Arabic OR English prompts into a single
+// concrete English FLUX prompt. Product terms (e.g. "Cloud") are kept verbatim
+// and nothing the user did not ask for is added. Falls back to the original
+// prompt on any failure.
+export async function reformulatePrompt(ai: any, prompt: string): Promise<string> {
+  const sys = [
+    'Rewrite the user prompt (Arabic or English) as one concise English image-generation prompt.',
+    'Keep every product name and trademark exactly as written (for example: "Cloud" stays "Cloud").',
+    'Describe only what the user asked: subject, action, place. Do not add lighting, colors,',
+    'characters, camera details or quality words the user did not mention.',
+    'Answer with the rewritten prompt text only, no quotes, no explanation.',
+  ].join(' ');
+  const out: any = await ai.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
+    messages: [
+      { role: 'system', content: sys },
+      { role: 'user', content: prompt },
+    ],
+    max_tokens: 400,
+  });
+  const text = typeof out?.response === 'string' ? out.response.trim() : '';
+  return text || prompt;
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,7 +44,7 @@ export function computeFluxCost(width: unknown, height: unknown, steps: unknown,
   // Cost = (num_steps * 9.60) + (num_tiles * 4.80) Neurons
   const reqWidth = Math.min(Math.max(Number(width) || 1024, 256), 1024);
   const reqHeight = Math.min(Math.max(Number(height) || 576, 256), 1024);
-  const reqSteps = Math.min(Math.max(Number(steps) || 4, 1), 4); // Capped at 4 for schnell
+  const reqSteps = Math.min(Math.max(Number(steps) || 4, 1), 8); // Capped at 8 for schnell (docs max)
   const tiles = Math.ceil(reqWidth / 512) * Math.ceil(reqHeight / 512);
   const cost = Math.ceil((reqSteps * 9.60) + (tiles * 4.80));
   return Number.isFinite(cost) && cost > 0 ? cost : fallbackCost;
@@ -97,7 +121,7 @@ export function createHandler(verify: VerifyFn = verifyAppCheckToken) {
 
         const fallbackCost = parsePositiveInt(env.FLUX_CONSERVATIVE_COST, DEFAULT_FLUX_CONSERVATIVE_COST);
         const cost = computeFluxCost(body.width, body.height, body.steps, fallbackCost);
-        const reqSteps = Math.min(Math.max(Number(body.steps) || 4, 1), 4);
+        const reqSteps = Math.min(Math.max(Number(body.steps) || 4, 1), 8);
 
         const stub = env.QUOTA_MANAGER.get(env.QUOTA_MANAGER.idFromName('global_quota_manager'));
 
@@ -120,23 +144,19 @@ export function createHandler(verify: VerifyFn = verifyAppCheckToken) {
             return Response.json({ error: 'Request not allowed' }, { status: reserveRes.status === 400 ? 400 : 503, headers: corsHeaders });
           }
 
-          // Translate Arabic prompts to English (FLUX understands English prompts)
-          if (/[\u0600-\u06FF]/.test(prompt)) {
-            try {
-              const tr: any = await env.AI.run('@cf/meta/m2m100-1.2b', { text: prompt, source_lang: 'ar', target_lang: 'en' });
-              if (tr && typeof tr.translated_text === 'string' && tr.translated_text.trim()) {
-                prompt = tr.translated_text.trim();
-              }
-            } catch (_e) {
-              // keep the original prompt if translation fails
-            }
+          // Rewrite Arabic or English prompts into one English FLUX prompt
+          let finalPrompt = prompt;
+          try {
+            finalPrompt = await reformulatePrompt(env.AI, prompt);
+          } catch (_e) {
+            // keep the original prompt if reformulation fails
           }
 
           // Execute FLUX.1 [schnell] via Cloudflare Workers AI Binding
           let imageResult: any;
           try {
             imageResult = await env.AI.run('@cf/black-forest-labs/flux-1-schnell', {
-              prompt: prompt,
+              prompt: finalPrompt,
               steps: reqSteps,
             });
           } catch (aiErr: any) {
@@ -186,6 +206,7 @@ export function createHandler(verify: VerifyFn = verifyAppCheckToken) {
               ...corsHeaders,
               'Content-Type': 'image/jpeg',
               'X-Request-ID': requestId,
+              'X-Final-Prompt': encodeURIComponent(finalPrompt.slice(0, FINAL_PROMPT_HEADER_MAX_CHARS)),
             }
           });
 

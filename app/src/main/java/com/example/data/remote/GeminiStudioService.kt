@@ -16,6 +16,8 @@ import kotlinx.coroutines.withContext
 
 private const val BACKEND_URL = "https://kamal-dz-studio-1---2027.faycallakal17.workers.dev"
 
+data class WorkerImageResult(val file: java.io.File, val finalPrompt: String?)
+
 object GeminiStudioService {
 
     private const val TAG = "GeminiStudioService"
@@ -95,10 +97,12 @@ object GeminiStudioService {
         return withContext(Dispatchers.IO) {
             try {
                 val sysInstruction = """
-                    أنت خبير إخراج سينمائي ومساعد ذكي لتوليد الفيديوهات والصور السينمائية.
-                    مهمتك إعادة صياغة برومبت المستخدم وتوسيعه بأسلوب سينمائي دقيق باللغة العربية الفصحى.
-                    أضف تفاصيل الإضاءة الحجمية (Volumetric Lighting)، زاوية الكاميرا ($cameraStyle)، العدسة (Anamorphic/Portrait)، الألوان (Teal & Orange)، وجودة الإطارات.
-                    اجعل الإجابة مباشرة عبارة عن النص السينمائي المحسّن فقط دون مقدمات أو شرح.
+                    Rewrite the user prompt as one concise English image-generation prompt.
+                    The user prompt may be in Arabic or English; the answer must always be in English.
+                    Keep every product name and trademark exactly as written (for example: "Cloud" stays "Cloud").
+                    Describe only what the user asked for: subject, action and place. Do not add lighting, colors,
+                    characters, camera details or quality words the user did not mention.
+                    Answer with the rewritten prompt text only, no quotes, no explanation.
                 """.trimIndent()
 
                 val generativeModel = getModel(systemInstructionText = sysInstruction)
@@ -183,8 +187,8 @@ object GeminiStudioService {
         prompt: String,
         width: Int = 1024,
         height: Int = 576,
-        steps: Int = 4
-    ): Result<java.io.File> {
+        steps: Int = 8
+    ): Result<WorkerImageResult> {
         return withContext(Dispatchers.IO) {
             try {
                 // Obtain App Check token string via Firebase App Check SDK
@@ -249,7 +253,15 @@ object GeminiStudioService {
                     val outputFile = java.io.File(outputDir, fileName)
                     outputFile.writeBytes(bytes)
 
-                    Result.success(outputFile)
+                    val finalPrompt = connection.getHeaderField("X-Final-Prompt")?.let { raw ->
+                        try {
+                            java.net.URLDecoder.decode(raw, "UTF-8")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not decode X-Final-Prompt: ${e.message}")
+                            null
+                        }
+                    }
+                    Result.success(WorkerImageResult(outputFile, finalPrompt))
                 } else {
                     val errorStream = connection.errorStream
                     val errorText = errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"

@@ -43,6 +43,7 @@ data class GenerationSlotState(
     val resultImageFile: String? = null,
     val hasResult: Boolean = false,
     val referenceImageUri: String? = null,
+    val finalPromptUsed: String? = null,
     val referenceDrawableRes: Int? = R.drawable.img_character_ref
 )
 
@@ -254,15 +255,17 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     prompt = currentSlot.prompt,
                     width = 1024,
                     height = 576,
-                    steps = 4
+                    steps = 8
                 )
 
-                result.onSuccess { imageFile ->
+                result.onSuccess { workerResult ->
                     fetchDailyQuota()
+                    val imageFile = workerResult.file
+                    val promptLine = workerResult.finalPrompt?.let { " النص المستخدم في التوليد: $it" } ?: ""
                     val successMsg = if (currentSlot.referenceImageUri != null) {
-                        "✨ تم توليد الصورة من النص عبر FLUX. الصورة المرجعية لم تُستخدم: التوليد من صورة غير متاح مجانياً حالياً."
+                        "✨ تم توليد الصورة من النص عبر FLUX. الصورة المرجعية لم تُستخدم: التوليد من صورة غير متاح مجانياً حالياً.$promptLine"
                     } else {
-                        "✨ تم توليد الصورة وحفظها محلياً بنجاح عبر FLUX."
+                        "✨ تم توليد الصورة وحفظها محلياً بنجاح عبر FLUX.$promptLine"
                     }
                     if (isSlot1) {
                         _slot1State.value = _slot1State.value.copy(
@@ -270,7 +273,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                             progress = 1.0f,
                             statusMessage = successMsg,
                             hasResult = true,
-                            resultImageFile = imageFile.absolutePath
+                            resultImageFile = imageFile.absolutePath,
+                            finalPromptUsed = workerResult.finalPrompt
                         )
                         repository.saveProject(
                             ProjectEntity(
@@ -291,7 +295,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                             progress = 1.0f,
                             statusMessage = successMsg,
                             hasResult = true,
-                            resultImageFile = imageFile.absolutePath
+                            resultImageFile = imageFile.absolutePath,
+                            finalPromptUsed = workerResult.finalPrompt
                         )
                         repository.saveProject(
                             ProjectEntity(

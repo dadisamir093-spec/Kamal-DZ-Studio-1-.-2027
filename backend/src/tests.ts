@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { QuotaDurableObject } from './durableObject';
 import { verifyAppCheckToken } from './appCheck';
-import { createHandler, computeFluxCost } from './index';
+import { createHandler, computeFluxCost, reformulatePrompt, FINAL_PROMPT_HEADER_MAX_CHARS } from './index';
 
 // Real in-memory SQLite (node:sqlite) behind the SqlStorage-like interface used by the Durable Object.
 const sqlite: any = (process as any).getBuiltinModule('node:sqlite');
@@ -344,5 +344,59 @@ test('image is still returned when the success bookkeeping call fails', async ()
   assert.strictEqual(w.calls.flux, 1);
   w.env.QUOTA_MANAGER.get = realFetch;
   assert.strictEqual((await w.generate('req-book-0001')).status, 409);
+  assert.strictEqual(w.calls.flux, 1);
+});
+
+// ---- New tests: prompt reformulation ----
+
+const LLAMA = '@cf/meta/llama-3.1-8b-instruct-fp8-fast';
+
+test('reformulatePrompt rewrites Arabic and English prompts via one llama call and keeps the answer verbatim', async () => {
+  const calls: { model: string; input: any }[] = [];
+  const fakeAi = {
+    run: async (model: string, input: any) => {
+      calls.push({ model, input });
+      return { response: 'Cloud logo on a white background' };
+    },
+  };
+  const fromArabic = await reformulatePrompt(fakeAi, 'شعار Cloud على خلفية بيضاء');
+  assert.strictEqual(fromArabic, 'Cloud logo on a white background');
+  const fromEnglish = await reformulatePrompt(fakeAi, 'Cloud logo on a white background');
+  assert.strictEqual(fromEnglish, 'Cloud logo on a white background');
+  assert.strictEqual(calls.length, 2);
+  assert.ok(calls.every((c) => c.model === LLAMA));
+  assert.ok(calls.every((c) => c.input.messages[1].content.length > 0));
+});
+
+test('reformulatePrompt failure keeps the original prompt as final prompt', async () => {
+  const w = makeWorker();
+  const originalRun = w.env.AI.run;
+  w.env.AI.run = async (model: string, input: any) => {
+    if (model === LLAMA) throw new Error('llama down');
+    return originalRun(model, input);
+  };
+  const res = await w.generate('req-ref-0001');
+  assert.strictEqual(res.status, 200);
+  const header = res.headers.get('X-Final-Prompt');
+  assert.ok(header, 'X-Final-Prompt header must be present');
+  assert.strictEqual(decodeURIComponent(header), 'a cat');
+  assert.strictEqual(w.calls.flux, 1);
+  assert.strictEqual(w.calls.translate, 0);
+});
+
+test('successful reformulation returns the rewritten prompt in X-Final-Prompt, truncated to 500 raw chars', async () => {
+  const w = makeWorker();
+  const longRewrite = 'x'.repeat(700);
+  const originalRun = w.env.AI.run;
+  w.env.AI.run = async (model: string, input: any) => {
+    if (model === LLAMA) return { response: longRewrite };
+    return originalRun(model, input);
+  };
+  const res = await w.generate('req-ref-0002');
+  assert.strictEqual(res.status, 200);
+  const header = res.headers.get('X-Final-Prompt');
+  assert.ok(header);
+  const decoded = decodeURIComponent(header);
+  assert.strictEqual(decoded, 'x'.repeat(FINAL_PROMPT_HEADER_MAX_CHARS));
   assert.strictEqual(w.calls.flux, 1);
 });

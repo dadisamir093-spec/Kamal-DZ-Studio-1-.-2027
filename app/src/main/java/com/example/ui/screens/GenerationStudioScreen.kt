@@ -707,6 +707,14 @@ fun GenerationStudioScreen(
                 ) {
                     Text(text = currentSlot.statusMessage, fontSize = 11.sp, color = PrimaryText)
                 }
+                if (!currentSlot.isGenerating && currentSlot.hasResult && !currentSlot.finalPromptUsed.isNullOrEmpty()) {
+                    Text(
+                        text = "النص النهائي: ${currentSlot.finalPromptUsed}",
+                        fontSize = 10.sp,
+                        color = PrimaryText,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
