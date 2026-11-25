@@ -20,6 +20,14 @@ android {
     versionName = "2.0.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Fixed App Check debug token injected from CI (env DEBUG_APPCHECK_TOKEN -> GitHub
+    // secret). Empty locally, so the debug provider keeps generating a fresh token.
+    buildConfigField(
+      "String",
+      "FIREBASE_APPCHECK_DEBUG_TOKEN",
+      "\"${(System.getenv("DEBUG_APPCHECK_TOKEN") ?: "").replace("\"", "").trim()}\""
+    )
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

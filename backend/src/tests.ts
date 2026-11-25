@@ -400,3 +400,21 @@ test('successful reformulation returns the rewritten prompt in X-Final-Prompt, t
   assert.strictEqual(decoded, 'x'.repeat(FINAL_PROMPT_HEADER_MAX_CHARS));
   assert.strictEqual(w.calls.flux, 1);
 });
+
+test('reformulatePrompt instructs the model to produce a detailed photorealistic English prompt', async () => {
+  const calls: { model: string; input: any }[] = [];
+  const fakeAi = {
+    run: async (model: string, input: any) => {
+      calls.push({ model, input });
+      return { response: 'a man selling tea' };
+    },
+  };
+  await reformulatePrompt(fakeAi, 'رجل يبيع الشاي');
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].model, LLAMA);
+  const sys = String(calls[0].input.messages[0].content);
+  for (const word of ['photorealistic', 'lighting', 'clothing', 'background', 'nationality']) {
+    assert.ok(sys.includes(word), `system prompt must mention ${word}`);
+  }
+  assert.ok(sys.includes('"Cloud"'), 'system prompt must keep product names verbatim');
+});

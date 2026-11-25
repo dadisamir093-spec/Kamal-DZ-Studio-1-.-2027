@@ -32,6 +32,21 @@ object GeminiStudioService {
             try {
                 val appCheckInstance = Firebase.appCheck
                 if (BuildConfig.DEBUG) {
+                    // Pin the debug token injected at build time (if any) so the provider
+                    // reuses the registered token instead of generating a new one per install.
+                    val fixedToken = BuildConfig.FIREBASE_APPCHECK_DEBUG_TOKEN.trim()
+                    if (fixedToken.isNotEmpty()) {
+                        try {
+                            val app = com.google.firebase.FirebaseApp.getInstance()
+                            val storageHelper = com.google.firebase.appcheck.debug.internal.StorageHelper(
+                                context, app.persistenceKey
+                            )
+                            storageHelper.saveDebugSecret(fixedToken)
+                            Log.d(TAG, "Pinned App Check debug token from build config.")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not pin App Check debug token: ${e.message}")
+                        }
+                    }
                     val factory = DebugAppCheckProviderFactory.getInstance()
                     appCheckInstance.installAppCheckProviderFactory(factory)
                     // Trigger provider creation immediately to instantiate and persist the debug secret
