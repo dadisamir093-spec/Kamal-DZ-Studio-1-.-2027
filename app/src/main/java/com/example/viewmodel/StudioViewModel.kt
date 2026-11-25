@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 
 data class GenerationSlotState(
     val slotIndex: Int = 1,
-    val mode: String = "نص إلى فيديو", // "توليد الصور", "صورة إلى فيديو", "نص إلى فيديو"
+    val mode: String = "توليد الصور", // "توليد الصور", "صورة إلى فيديو", "نص إلى فيديو"
     val prompt: String = "مشهد سينمائي لرجل مميز في مدينة جزائرية قديمة عند غروب الشمس، إضاءة ذهبية ولقطة سينمائية",
     val negativePrompt: String = "تشوه، حركة غير واقعية، جودة منخفضة، ضبابية، نص غير مرغوب",
     val cameraMovement: String = "كاميرا سينمائية (Dolly In)",
@@ -39,9 +39,9 @@ data class GenerationSlotState(
     val isGenerating: Boolean = false,
     val progress: Float = 0f,
     val statusMessage: String = "",
-    val resultImageRes: Int? = R.drawable.img_cinematic_hero,
+    val resultImageRes: Int? = null,
     val resultImageFile: String? = null,
-    val hasResult: Boolean = true,
+    val hasResult: Boolean = false,
     val referenceImageUri: String? = null,
     val referenceDrawableRes: Int? = R.drawable.img_character_ref
 )
@@ -136,8 +136,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             prompt = "لقطة مقرّبة لشخصية سينمائية بنظارات داكنة في أزقة القصبة مع إضاءة نيون ناعمة",
             cameraMovement = "Orbit Shot — دوران حول الشخصية",
             lens = "Portrait 85mm",
-            aspectRatio = "1:1",
-            resultImageRes = R.drawable.img_character_ref
+            aspectRatio = "1:1"
         )
     )
     val slot2State: StateFlow<GenerationSlotState> = _slot2State.asStateFlow()
@@ -243,23 +242,12 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
         generationJob = viewModelScope.launch {
             if (currentSlot.mode == "توليد الصور") {
+                val workingMsg = "توليد حقيقي قيد التنفيذ: App Check ثم Cloudflare Worker ثم FLUX.1 [schnell]..."
                 if (isSlot1) {
-                    _slot1State.value = _slot1State.value.copy(
-                        isGenerating = true,
-                        progress = 0.15f,
-                        statusMessage = "التحقق من Firebase App Check وجاري الاتصال بـ Cloudflare..."
-                    )
+                    _slot1State.value = _slot1State.value.copy(isGenerating = true, progress = 0f, hasResult = false, statusMessage = workingMsg)
                 } else {
-                    _slot2State.value = _slot2State.value.copy(
-                        isGenerating = true,
-                        progress = 0.15f,
-                        statusMessage = "التحقق من Firebase App Check وجاري الاتصال بـ Cloudflare..."
-                    )
+                    _slot2State.value = _slot2State.value.copy(isGenerating = true, progress = 0f, hasResult = false, statusMessage = workingMsg)
                 }
-
-                delay(300)
-                if (isSlot1) _slot1State.value = _slot1State.value.copy(progress = 0.45f, statusMessage = "توليد الصورة عبر نموذج FLUX.1 [schnell]...")
-                else _slot2State.value = _slot2State.value.copy(progress = 0.45f, statusMessage = "توليد الصورة عبر نموذج FLUX.1 [schnell]...")
 
                 val result = com.example.data.remote.GeminiStudioService.generateImageWithCloudflareWorker(
                     context = getApplication(),
@@ -271,7 +259,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
                 result.onSuccess { imageFile ->
                     fetchDailyQuota()
-                    val successMsg = "✨ تم توليد المشهد السينمائي بنجاح باستخدام FLUX!"
+                    val successMsg = if (currentSlot.referenceImageUri != null) {
+                        "✨ تم توليد الصورة من النص عبر FLUX. الصورة المرجعية لم تُستخدم: التوليد من صورة غير متاح مجانياً حالياً."
+                    } else {
+                        "✨ تم توليد الصورة وحفظها محلياً بنجاح عبر FLUX."
+                    }
                     if (isSlot1) {
                         _slot1State.value = _slot1State.value.copy(
                             isGenerating = false,
@@ -332,71 +324,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
+                val unavailableMsg = "توليد الفيديو والشخصيات غير متاح حالياً: لا يوجد نموذج مجاني متصل. استخدم وضع «توليد الصور»."
                 if (isSlot1) {
-                    _slot1State.value = _slot1State.value.copy(
-                        isGenerating = true,
-                        progress = 0.05f,
-                        statusMessage = "تحليل البرومبت السينمائي وحركة الكاميرا..."
-                    )
+                    _slot1State.value = _slot1State.value.copy(isGenerating = false, progress = 0f, hasResult = false, statusMessage = unavailableMsg)
                 } else {
-                    _slot2State.value = _slot2State.value.copy(
-                        isGenerating = true,
-                        progress = 0.05f,
-                        statusMessage = "تحليل البرومبت وإعداد المحرك..."
-                    )
-                }
-
-                delay(600)
-                val step2Msg = "معالجة الإطارات بدقة وحساب الإضاءة والعمق..."
-                if (isSlot1) _slot1State.value = _slot1State.value.copy(progress = 0.35f, statusMessage = step2Msg)
-                else _slot2State.value = _slot2State.value.copy(progress = 0.35f, statusMessage = step2Msg)
-
-                delay(800)
-                val step3Msg = "تطبيق الفلاتر السينمائية والانتقالات الانسيابية..."
-                if (isSlot1) _slot1State.value = _slot1State.value.copy(progress = 0.75f, statusMessage = step3Msg)
-                else _slot2State.value = _slot2State.value.copy(progress = 0.75f, statusMessage = step3Msg)
-
-                delay(600)
-                if (isSlot1) {
-                    _slot1State.value = _slot1State.value.copy(
-                        isGenerating = false,
-                        progress = 1.0f,
-                        statusMessage = "تم توليد المشهد السينمائي بنجاح!",
-                        hasResult = true,
-                        resultImageRes = R.drawable.img_cinematic_hero
-                    )
-                    repository.saveProject(
-                        ProjectEntity(
-                            title = "توليد سينمائي جديد - ${_slot1State.value.cameraMovement}",
-                            description = _slot1State.value.prompt,
-                            durationText = _slot1State.value.durationText,
-                            resolution = _slot1State.value.resolution,
-                            aspectRatio = _slot1State.value.aspectRatio,
-                            fps = _slot1State.value.fps,
-                            category = "فيديو سينمائي",
-                            thumbnailResId = R.drawable.img_cinematic_hero
-                        )
-                    )
-                } else {
-                    _slot2State.value = _slot2State.value.copy(
-                        isGenerating = false,
-                        progress = 1.0f,
-                        statusMessage = "تم إنشاء النتيجة بنجاح!",
-                        hasResult = true,
-                        resultImageRes = R.drawable.img_character_ref
-                    )
-                    repository.saveProject(
-                        ProjectEntity(
-                            title = "شخصية سينمائية - ${_slot2State.value.lens}",
-                            description = _slot2State.value.prompt,
-                            durationText = "01:00",
-                            resolution = _slot2State.value.resolution,
-                            aspectRatio = _slot2State.value.aspectRatio,
-                            fps = 30,
-                            category = "شخصيات",
-                            thumbnailResId = R.drawable.img_character_ref
-                        )
-                    )
+                    _slot2State.value = _slot2State.value.copy(isGenerating = false, progress = 0f, hasResult = false, statusMessage = unavailableMsg)
                 }
             }
         }
@@ -1604,32 +1536,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     private val _exportProgress = MutableStateFlow(0f)
     val exportProgress: StateFlow<Float> = _exportProgress.asStateFlow()
 
-    fun startExport(projectTitle: String = "مشروع_سينمائي_نهائي") {
-        viewModelScope.launch {
-            _isExporting.value = true
-            _exportProgress.value = 0.1f
-            delay(500)
-            _exportProgress.value = 0.45f
-            delay(600)
-            _exportProgress.value = 0.85f
-            delay(500)
-            _exportProgress.value = 1.0f
-            _isExporting.value = false
+    private val _exportNotice = MutableStateFlow<String?>(null)
+    val exportNotice: StateFlow<String?> = _exportNotice.asStateFlow()
 
-            repository.saveExportTask(
-                ExportTaskEntity(
-                    fileName = "${projectTitle}_${_exportResolution.value.take(5)}.${_exportFormat.value.lowercase()}",
-                    projectTitle = projectTitle,
-                    format = _exportFormat.value,
-                    resolution = _exportResolution.value,
-                    fps = _exportFps.value,
-                    quality = _exportQuality.value,
-                    fileSizeMb = 345.5f,
-                    progress = 100,
-                    status = "COMPLETED"
-                )
-            )
-        }
+    // Real video encoding is not implemented (TimelineMediaEngine only builds an ffmpeg command string),
+    // so no fake progress or COMPLETED export record is produced.
+    fun startExport(projectTitle: String = "مشروع_سينمائي_نهائي") {
+        _exportNotice.value = "تصدير الفيديو غير متاح حالياً: لا يوجد محرك ترميز محلي مثبت، ولم يُنشأ أي ملف."
     }
 
     // Skills Center Actions

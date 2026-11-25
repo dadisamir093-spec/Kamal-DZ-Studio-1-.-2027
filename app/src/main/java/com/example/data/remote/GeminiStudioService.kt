@@ -192,21 +192,29 @@ object GeminiStudioService {
                 var appCheckError: String? = null
                 try {
                     val tokenTask = com.google.firebase.appcheck.FirebaseAppCheck.getInstance().getAppCheckToken(false)
-                    val tokenResult = com.google.android.gms.tasks.Tasks.await(tokenTask)
+                    val tokenResult = com.google.android.gms.tasks.Tasks.await(
+                        tokenTask, 20, java.util.concurrent.TimeUnit.SECONDS
+                    )
                     appCheckToken = tokenResult.token
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "App Check token task failed: ${e.message}")
                     appCheckError = e.message ?: e.javaClass.simpleName
+                }
+
+                if (appCheckToken.isNullOrEmpty()) {
+                    return@withContext Result.failure(
+                        Exception("تعذّر الحصول على توكن Firebase App Check من الجهاز: ${appCheckError ?: "التوكن فارغ"}. لم يُرسَل أي طلب إلى الخادم.")
+                    )
                 }
 
                 val url = java.net.URL("$BACKEND_URL/ai/generate-image")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
-                if (!appCheckToken.isNullOrEmpty()) {
-                    connection.setRequestProperty("X-Firebase-AppCheck", appCheckToken)
-                    connection.setRequestProperty("Authorization", "Bearer $appCheckToken")
-                }
+                connection.setRequestProperty("X-Firebase-AppCheck", appCheckToken)
+                connection.setRequestProperty("Authorization", "Bearer $appCheckToken")
                 val requestId = java.util.UUID.randomUUID().toString()
                 connection.setRequestProperty("X-Request-ID", requestId)
                 connection.connectTimeout = 30000
@@ -227,6 +235,13 @@ object GeminiStudioService {
                 val responseCode = connection.responseCode
                 if (responseCode == 200) {
                     val bytes = connection.inputStream.use { it.readBytes() }
+                    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                    if (bytes.isEmpty() || bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                        return@withContext Result.failure(
+                            Exception("استجاب الخادم بنجاح لكن البيانات المستلمة ليست صورة صالحة (${bytes.size} بايت)")
+                        )
+                    }
                     
                     val outputDir = java.io.File(context.filesDir, "generated_images")
                     if (!outputDir.exists()) outputDir.mkdirs()
@@ -241,8 +256,10 @@ object GeminiStudioService {
                     val errorMsg = try {
                         org.json.JSONObject(errorText).optString("error", errorText)
                     } catch (e: Exception) { errorText }
-                    Result.failure(Exception(if (appCheckToken.isNullOrEmpty()) "$errorMsg | سبب غياب التوكن: ${appCheckError ?: "التوكن فارغ"}" else errorMsg))
+                    Result.failure(Exception("$errorMsg (HTTP $responseCode)"))
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error calling Cloudflare Worker generate-image: ${e.message}", e)
                 Result.failure(e)

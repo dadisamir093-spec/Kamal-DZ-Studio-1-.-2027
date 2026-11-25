@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
@@ -148,13 +149,6 @@ fun GenerationStudioScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
                             )
-                        } else if (currentSlot.hasResult || currentSlot.resultImageRes != null) {
-                            Image(
-                                painter = painterResource(id = currentSlot.resultImageRes ?: R.drawable.img_cinematic_hero),
-                                contentDescription = "الصورة المولدة",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
                         } else if (currentSlot.referenceImageUri != null) {
                             AsyncImage(
                                 model = currentSlot.referenceImageUri,
@@ -163,11 +157,11 @@ fun GenerationStudioScreen(
                                 contentScale = ContentScale.Crop
                             )
                         } else {
-                            Image(
-                                painter = painterResource(id = currentSlot.referenceDrawableRes ?: R.drawable.img_character_ref),
-                                contentDescription = "الصورة المولدة",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "اختيار صورة مرجعية",
+                                tint = CyanAccent,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -270,13 +264,22 @@ fun GenerationStudioScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-            } else {
+            } else if (currentSlot.resultImageRes != null) {
                 Image(
-                    painter = painterResource(id = currentSlot.resultImageRes ?: R.drawable.img_cinematic_hero),
+                    painter = painterResource(id = currentSlot.resultImageRes),
                     contentDescription = "معاينة التوليد السينمائي",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
+            } else {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "لا توجد صورة مولّدة بعد. اضغط «إنشاء الآن» لتوليد صورة حقيقية.",
+                        fontSize = 12.sp,
+                        color = SecondaryText,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
             }
 
             // Dark Vignette Overlay
@@ -657,10 +660,8 @@ fun GenerationStudioScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(text = currentSlot.statusMessage, fontSize = 11.sp, color = PrimaryText)
-                    Text(text = "${(currentSlot.progress * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
                 }
                 LinearProgressIndicator(
-                    progress = { currentSlot.progress },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(6.dp)

@@ -97,6 +97,7 @@ fun ExportStudioScreen(
     val resolution by viewModel.exportResolution.collectAsState()
     val fps by viewModel.exportFps.collectAsState()
     val isExporting by viewModel.isExporting.collectAsState()
+    val exportNotice by viewModel.exportNotice.collectAsState()
     val progress by viewModel.exportProgress.collectAsState()
     val tasks by viewModel.exportTasks.collectAsState()
     val editingQuality by viewModel.editingQuality.collectAsState()
@@ -512,10 +513,10 @@ fun ExportStudioScreen(
                         Text(text = "معلومات التشفير:", fontSize = 9.sp, color = SecondaryText)
                         Text(text = "H.264 / AAC • معدل البت: 18 Mbps", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PrimaryText)
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(text = "الحجم التقديري:", fontSize = 9.sp, color = SecondaryText)
-                        Text(text = "~ 34.2 MB", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanAccent)
-                    }
+                }
+
+                exportNotice?.let { notice ->
+                    Text(text = notice, fontSize = 10.sp, color = SecondaryText)
                 }
 
                 // Export Progress (if running)
