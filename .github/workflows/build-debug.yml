@@ -36,3 +36,10 @@ jobs:
         env:
           DEBUG_APPCHECK_TOKEN: ${{ secrets.DEBUG_APPCHECK_TOKEN }}
         run: gradle assembleDebug --stacktrace
+
+        
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kamal-studio-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
