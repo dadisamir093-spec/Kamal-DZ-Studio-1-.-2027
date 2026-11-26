@@ -765,7 +765,7 @@ fun GenerationStudioScreen(
         // Primary Action Button: "✨ إنشاء الآن" (matches screenshot)
         Button(
             onClick = { viewModel.startGeneration() },
-            enabled = !currentSlot.isGenerating && currentSlot.mode == "توليد الصور",
+            enabled = !currentSlot.isGenerating && (currentSlot.mode == "توليد الصور" || currentSlot.mode == "نص إلى فيديو"),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ElectricBlue,
                 disabledContainerColor = ElectricBlue.copy(alpha = 0.5f)
