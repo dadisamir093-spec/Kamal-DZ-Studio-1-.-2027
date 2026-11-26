@@ -16,10 +16,11 @@ export const FINAL_PROMPT_HEADER_MAX_CHARS = 500;
 // prompt on any failure.
 export async function reformulatePrompt(ai: any, prompt: string): Promise<string> {
   const sys = [
-    'Rewrite the user prompt (Arabic or English) as one concise English image-generation prompt.',
+    'Rewrite the user prompt (Arabic or English) as one detailed, concrete English photorealistic image-generation prompt.',
     'Keep every product name and trademark exactly as written (for example: "Cloud" stays "Cloud").',
-    'Describe only what the user asked: subject, action, place. Do not add lighting, colors,',
-    'characters, camera details or quality words the user did not mention.',
+    'Keep the same subject, action and place the user asked for - never add new people, objects, logos or text.',
+    'Enrich the description with concrete visual detail: apparent nationality or ethnicity, clothing, background and setting,',
+    'lighting (direction, time of day, mood), camera framing, and the word photorealistic.',
     'Answer with the rewritten prompt text only, no quotes, no explanation.',
   ].join(' ');
   const out: any = await ai.run('@cf/meta/llama-3.1-8b-instruct-fp8-fast', {
