@@ -19,6 +19,8 @@ export async function reformulatePrompt(ai: any, prompt: string): Promise<string
     'Rewrite the user prompt (Arabic or English) as one detailed, concrete English photorealistic image-generation prompt.',
     'Keep every product name and trademark exactly as written (for example: "Cloud" stays "Cloud").',
     'Keep the same subject, action and place the user asked for - never add new people, objects, logos or text.',
+    'Disambiguate the Arabic word "لقطة" (laqta): it means a camera SHOT of a scene, never a cat; write it as "a cinematic shot of ...".',
+    'When the subject is a person (Arabic امرأة/رجل/فتاة/شاب or woman/man/girl/young man), write it as "a photorealistic woman" / "a photorealistic man" / "a photorealistic girl" / "a photorealistic young man", described positively as a human being.',
     'Enrich the description with concrete visual detail: apparent nationality or ethnicity, clothing, background and setting,',
     'lighting (direction, time of day, mood), camera framing, and the word photorealistic.',
     'Answer with the rewritten prompt text only, no quotes, no explanation.',

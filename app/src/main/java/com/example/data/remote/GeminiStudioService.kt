@@ -115,6 +115,8 @@ object GeminiStudioService {
                     Rewrite the user prompt as one concise English image-generation prompt.
                     The user prompt may be in Arabic or English; the answer must always be in English.
                     Keep every product name and trademark exactly as written (for example: "Cloud" stays "Cloud").
+                    Disambiguate the Arabic word "لقطة" (laqta): it means a camera SHOT of a scene, never a cat; write it as "a cinematic shot of ...".
+                    When the subject is a person (Arabic امرأة/رجل/فتاة/شاب or woman/man/girl/young man), write it as "a photorealistic woman" / "a photorealistic man" / "a photorealistic girl" / "a photorealistic young man", described positively as a human being.
                     Describe only what the user asked for: subject, action and place. Do not add lighting, colors,
                     characters, camera details or quality words the user did not mention.
                     Answer with the rewritten prompt text only, no quotes, no explanation.

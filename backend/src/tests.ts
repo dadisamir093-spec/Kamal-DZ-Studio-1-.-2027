@@ -418,3 +418,23 @@ test('reformulatePrompt instructs the model to produce a detailed photorealistic
   }
   assert.ok(sys.includes('"Cloud"'), 'system prompt must keep product names verbatim');
 });
+
+test('reformulatePrompt disambiguates laqta as a camera shot and writes people positively without "not an animal"', async () => {
+  const calls: { model: string; input: any }[] = [];
+  const fakeAi = {
+    run: async (model: string, input: any) => {
+      calls.push({ model, input });
+      return { response: 'a photorealistic woman walking in a forest' };
+    },
+  };
+  await reformulatePrompt(fakeAi, 'لقطة لامرأة جميلة تمشي في غابة كثيفة');
+  assert.strictEqual(calls.length, 1);
+  const sys = String(calls[0].input.messages[0].content);
+  assert.ok(sys.includes('لقطة'), 'system prompt must mention the Arabic word laqta');
+  assert.ok(/camera\s+SHOT/i.test(sys), 'laqta must be defined as a camera shot');
+  assert.ok(/never a cat/i.test(sys), 'laqta must never be a cat');
+  for (const phrase of ['a photorealistic woman', 'a photorealistic man', 'a photorealistic girl', 'a photorealistic young man']) {
+    assert.ok(sys.includes(phrase), `system prompt must cover ${phrase}`);
+  }
+  assert.ok(!/not an animal/i.test(sys), 'no negative phrasing "not an animal" allowed');
+});
