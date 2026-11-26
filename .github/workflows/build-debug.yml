@@ -12,23 +12,27 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 9.3.1
-
-      - name: Generate temporary debug keystore
+      - name: Restore or generate debug keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          DEBUG_STORE_PASSWORD: ${{ secrets.DEBUG_STORE_PASSWORD }}
         run: |
-          keytool -genkeypair -keystore debug.keystore \
-            -storepass android -keypass android \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 \
-            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+            keytool -list -keystore debug.keystore \
+              -storepass "${DEBUG_STORE_PASSWORD:-android}" > /dev/null
+            echo "Debug keystore restored from secrets (stable signature)."
+          else
+            echo "DEBUG_KEYSTORE_BASE64 not set - generating a temporary debug keystore."
+            keytool -genkeypair -keystore debug.keystore \
+              -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Build debug APK
+        env:
+          DEBUG_APPCHECK_TOKEN: ${{ secrets.DEBUG_APPCHECK_TOKEN }}
         run: gradle assembleDebug --stacktrace
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kamal-studio-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
