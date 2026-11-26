@@ -356,9 +356,8 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         currentSlot: GenerationSlotState,
         isSlot1: Boolean
     ) {
-        getApplication<Application>
         val imageCount = VIDEO_IMAGE_COUNT
-
+        val app = getApplication<Application>()
         fun setState(transform: (GenerationSlotState) -> GenerationSlotState) {
             if (isSlot1) _slot1State.value = transform(_slot1State.value)
             else _slot2State.value = transform(_slot2State.value)
