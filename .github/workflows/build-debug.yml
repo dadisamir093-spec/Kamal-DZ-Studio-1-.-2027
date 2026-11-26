@@ -21,8 +21,8 @@ jobs:
         run: |
           if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
             echo "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
-            keytool -list -keystore debug.keystore \
-              -storepass "${DEBUG_STORE_PASSWORD:-android}" > /dev/null
+            ls -l debug.keystore
+            keytool -list -keystore debug.keystore -storepass "${DEBUG_STORE_PASSWORD:-android}" 2>&1 | head -5
             echo "Debug keystore restored from secrets (stable signature)."
           else
             echo "DEBUG_KEYSTORE_BASE64 not set - generating a temporary debug keystore."
