@@ -59,6 +59,11 @@ data class CharacterArchetype(
 
 class StudioViewModel(application: Application) : AndroidViewModel(application) {
 
+    private companion object {
+        /** عدد الصور المتتابعة في وضع «نص إلى فيديو». */
+        const val VIDEO_IMAGE_COUNT = 4
+    }
+
     private val repository: StudioRepository
     val projects: StateFlow<List<ProjectEntity>>
     val characters: StateFlow<List<CharacterEntity>>
@@ -328,13 +333,118 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 }
+            } else if (currentSlot.mode == "نص إلى فيديو") {
+                startTextToVideoGeneration(currentSlot, isSlot1)
             } else {
-                val unavailableMsg = "توليد الفيديو والشخصيات غير متاح حالياً: لا يوجد نموذج مجاني متصل. استخدم وضع «توليد الصور»."
+                val unavailableMsg = "توليد الشخصيات غير متاح حالياً: لا يوجد نموذج مجاني متصل. استخدم وضع «توليد الصور» أو «نص إلى فيديو»."
                 if (isSlot1) {
                     _slot1State.value = _slot1State.value.copy(isGenerating = false, progress = 0f, hasResult = false, statusMessage = unavailableMsg)
                 } else {
                     _slot2State.value = _slot2State.value.copy(isGenerating = false, progress = 0f, hasResult = false, statusMessage = unavailableMsg)
                 }
+            }
+        }
+    }
+
+    /**
+     * نص إلى فيديو: يولّد 3-6 صور متتابعة عبر نفس مسار /ai/generate-image المجاني
+     * (نفس حصة Neuron اليومية)، مع فحص الحصة قبل كل صورة وإيقاف إن لم تكفِ،
+     * ثم يركّبها فيديو MP4 محلياً بحركة تقريب خفيفة وانتقال متدرج عبر MediaCodec،
+     * ويحفظه في Movies/KamalDZStudio ويظهر في المكتبة.
+     */
+    private fun startTextToVideoGeneration(
+        currentSlot: GenerationSlotState,
+        isSlot1: Boolean
+    ) {
+        val app = getApplication<android.content.Context>()
+        val imageCount = VIDEO_IMAGE_COUNT
+
+        fun setState(transform: (GenerationSlotState) -> GenerationSlotState) {
+            if (isSlot1) _slot1State.value = transform(_slot1State.value)
+            else _slot2State.value = transform(_slot2State.value)
+        }
+
+        generationJob = viewModelScope.launch {
+            setState { it.copy(isGenerating = true, progress = 0f, hasResult = false, resultImageFile = null, statusMessage = "نص إلى فيديو: جارٍ فحص الحصة اليومية...") }
+
+            // 1) فحص الحصة المتوقعة قبل البدء
+            val quota = com.example.data.remote.GeminiStudioService.fetchDailyQuotaInfo(app).getOrNull()
+            val perImageCost = 16 // 8 steps * (9.6 baseline + tiling) على 1024x576 - تقدير متحفظ
+            val estimatedCost = perImageCost * imageCount
+            if (quota != null && quota.remainingNeurons < estimatedCost) {
+                setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ الحصة المتبقية (${quota.remainingNeurons} Neuron) لا تكفي للتوليد المتوقع (~$estimatedCost Neuron لـ $imageCount صور). حاول غداً أو قلّل العدد.") }
+                return@launch
+            }
+            val costNote = quota?.let { "الحصة المتبقية: ${it.remainingNeurons} Neuron، التكلفة المتوقعة: ~$estimatedCost Neuron." } ?: "تعذر جلب الحصة - سيتم التوليد والتحقق من الاستجابة."
+
+            val images = mutableListOf<android.graphics.Bitmap>()
+            try {
+                for (i in 1..imageCount) {
+                    setState { it.copy(statusMessage = "نص إلى فيديو ($costNote): توليد الصورة $i من $imageCount...", progress = (i - 1) / imageCount.toFloat()) }
+                    // تنويع لطيف للبرومبت حتى تختلف اللقطات دون إضافة عناصر لم يذكرها المستخدم
+                    val shotPrompt = if (i == 1) currentSlot.prompt
+                        else "${currentSlot.prompt}, alternate camera angle ${i}"
+                    val result = com.example.data.remote.GeminiStudioService.generateImageWithCloudflareWorker(
+                        context = app,
+                        prompt = shotPrompt,
+                        width = 1024,
+                        height = 576,
+                        steps = 8
+                    )
+                    val file = result.getOrNull()?.file
+                        ?: run {
+                            val err = result.exceptionOrNull()?.localizedMessage ?: "خطأ غير معروف"
+                            setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ توقّف التوليد عند الصورة $i: $err") }
+                            return@launch
+                        }
+                    val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                    if (bmp == null) {
+                        setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ تعذر قراءة الصورة $i") }
+                        return@launch
+                    }
+                    images.add(bmp)
+                }
+
+                setState { it.copy(statusMessage = "تركيب الفيديو محلياً (${images.size} صور)...", progress = 0.9f) }
+                val video = com.example.video.VideoComposer.compose(app, images)
+                val vr = video.getOrNull() ?: run {
+                    val err = video.exceptionOrNull()?.localizedMessage ?: "خطأ غير معروف"
+                    setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ فشل تركيب الفيديو: $err") }
+                    return@launch
+                }
+                images.forEach { it.recycle() }
+                images.clear()
+
+                val uri = com.example.video.VideoComposer.registerInMediaStore(app, vr.file)
+                val msg = "🎬 تم إنشاء الفيديو (${vr.durationMs / 1000} ثانية، ${vr.frameCount} إطاراً) وحفظه في Movies/KamalDZStudio"
+                setState {
+                    it.copy(
+                        isGenerating = false,
+                        progress = 1.0f,
+                        hasResult = true,
+                        resultImageFile = uri?.toString(),
+                        statusMessage = msg
+                    )
+                }
+                repository.saveProject(
+                    ProjectEntity(
+                        title = "نص إلى فيديو - ${currentSlot.cameraMovement}",
+                        description = currentSlot.prompt,
+                        durationText = "00:%02d".format(vr.durationMs / 1000),
+                        resolution = "576p",
+                        aspectRatio = currentSlot.aspectRatio,
+                        fps = 30,
+                        category = "نص إلى فيديو",
+                        thumbnailUri = uri?.toString(),
+                        thumbnailResId = R.drawable.img_cinematic_hero
+                    )
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                images.forEach { it.recycle() }
+                throw e
+            } catch (e: Exception) {
+                images.forEach { it.recycle() }
+                setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ خطأ في وضع نص إلى فيديو: ${e.localizedMessage ?: e.javaClass.simpleName}") }
             }
         }
     }
