@@ -4,9 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Matrix
+import android.graphics.Color
 import android.graphics.Paint
-import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -15,16 +14,21 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Encodes a sequence of images into a short MP4 clip with a gentle Ken Burns
- * (slow zoom) per image and cross-fade transitions, using MediaCodec +
- * MediaMuxer only - no paid or third-party libraries.
+ * Encodes a sequence of images into a short MP4 clip (H.264) with a slow zoom
+ * (Ken Burns) per image and cross-fades between them.
+ *
+ * The encoder uses a MediaCodec input Surface (createInputSurface) and draws
+ * every frame with Canvas.lockCanvas, which avoids the YUV layout pitfalls of
+ * the buffer-input path (that path raised IllegalStateException on device).
  */
 object VideoComposer {
 
@@ -36,21 +40,25 @@ object VideoComposer {
         val height: Int
     )
 
+    /** Exception class + message + up to 3 stack frames, safe for a status line. */
+    fun describeError(e: Throwable): String {
+        val frames = e.stackTrace
+            .take(3)
+            .joinToString(" <- ") { f -> "${f.fileName ?: "?"}:${f.lineNumber}" }
+        val message = e.message?.takeIf { it.isNotBlank() } ?: "(no message)"
+        val base = "${e.javaClass.simpleName}: $message"
+        return if (frames.isBlank()) base else "$base | $frames"
+    }
+
     /** Conservative H.264 sizes per aspect ratio, big first then a smaller fallback. */
     private fun targetSizes(aspectRatio: String): List<Pair<Int, Int>> = when (aspectRatio.trim()) {
+        "1:1" -> listOf(720 to 720, 480 to 480)
         "9:16" -> listOf(720 to 1280, 540 to 960)
-        "1:1" -> listOf(720 to 720, 540 to 540)
         "4:5" -> listOf(720 to 900, 576 to 720)
         "21:9" -> listOf(1260 to 540, 840 to 360)
-        "16:9" -> listOf(1280 to 720, 960 to 540)
         else -> listOf(1280 to 720, 960 to 540)
     }
 
-    /**
-     * @param images ordered bitmaps (2+)
-     * @param msPerImage how long each image is on screen
-     * @param aspectRatio slot aspect ratio ("16:9", "9:16", ...)
-     */
     suspend fun compose(
         context: Context,
         images: List<Bitmap>,
@@ -97,23 +105,29 @@ object VideoComposer {
         outHeight: Int,
         outFile: File
     ): VideoResult {
-        val framesPerImage = msPerImage * fps / 1000
+        val framesPerImage = max(1, msPerImage * fps / 1000)
         val fadeFrames = min(framesPerImage / 4, fps)
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
+        var inputSurface: Surface? = null
+        var totalFrames = 0
         try {
             val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             encoder = enc
-            val colorFormat = pickColorFormat(enc)
             val format = MediaFormat.createVideoFormat(
                 MediaFormat.MIMETYPE_VIDEO_AVC, outWidth, outHeight
             ).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
+                setInteger(
+                    MediaFormat.KEY_COLOR_FORMAT,
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
+                )
                 setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
                 setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             }
             enc.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            val surface = enc.createInputSurface()
+            inputSurface = surface
             enc.start()
 
             val mux = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -121,123 +135,117 @@ object VideoComposer {
 
             var trackIndex = -1
             var muxerStarted = false
-            var frameIndex = 0
             val bufferInfo = MediaCodec.BufferInfo()
-            val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-
-            fun drawFrame(bitmap: Bitmap, zoom: Float): Bitmap {
-                val out = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(out)
-                // center-crop the source into the target frame so no aspect distortion
-                val scale = max(
-                    outWidth.toFloat() / bitmap.width,
-                    outHeight.toFloat() / bitmap.height
-                ) * zoom
-                val dx = (outWidth - bitmap.width * scale) / 2f
-                val dy = (outHeight - bitmap.height * scale) / 2f
-                val m = Matrix().apply {
-                    postScale(scale, scale)
-                    postTranslate(dx, dy)
-                }
-                canvas.drawBitmap(bitmap, m, paint)
-                return out
-            }
-
-            fun blend(prev: Bitmap, next: Bitmap, alpha: Float): Bitmap {
-                val out = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(out)
-                val pm = Paint(Paint.FILTER_BITMAP_FLAG).apply { this.alpha = ((1f - alpha) * 255).toInt() }
-                val nm = Paint(Paint.FILTER_BITMAP_FLAG).apply { this.alpha = (alpha * 255).toInt() }
-                canvas.drawBitmap(prev, 0f, 0f, pm)
-                canvas.drawBitmap(next, 0f, 0f, nm)
-                return out
-            }
-
-            fun queueFrame(bitmap: Bitmap, ptsUs: Long): Boolean {
-                val inputIndex = enc.dequeueInputBuffer(20_000)
-                if (inputIndex < 0) return false
-                val yuvSize = outWidth * outHeight * 3 / 2
-                val image: Image? = enc.getInputImage(inputIndex)
-                if (image != null) {
-                    try {
-                        if (image.width != outWidth || image.height != outHeight) {
-                            throw IllegalStateException(
-                                "أبعاد صورة المشفّر غير مطابقة (${image.width}x${image.height} != ${outWidth}x$outHeight)"
-                            )
-                        }
-                        fillImage(image, bitmap)
-                    } finally {
-                        image.close()
-                    }
-                } else {
-                    val buf = enc.getInputBuffer(inputIndex)
-                        ?: throw IllegalStateException("تعذّر الحصول على مخزن إدخال المشفّر")
-                    val nv12 = bitmapToNv12(bitmap)
-                    if (nv12.size > buf.capacity()) {
-                        throw IllegalStateException(
-                            "حجم إطار YUV أكبر من المخزن (${nv12.size} > ${buf.capacity()})"
-                        )
-                    }
-                    buf.clear()
-                    buf.put(nv12)
-                }
-                enc.queueInputBuffer(inputIndex, 0, yuvSize, ptsUs, 0)
-                return true
-            }
 
             fun drainEncoder(endOfStream: Boolean) {
+                var idleRounds = 0
                 while (true) {
-                    val outIndex = enc.dequeueOutputBuffer(bufferInfo, if (endOfStream) 10_000 else 0)
+                    val outIndex = enc.dequeueOutputBuffer(
+                        bufferInfo,
+                        if (endOfStream) 10_000L else 0L
+                    )
                     if (outIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                        if (!endOfStream) break
+                        if (!endOfStream) return
+                        idleRounds++
+                        if (idleRounds > 300) {
+                            throw IllegalStateException(
+                                "انتهت المهلة دون استلام إشارة نهاية الترميز (EOS)"
+                            )
+                        }
                         continue
                     }
+                    idleRounds = 0
                     if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        if (muxerStarted) {
+                            throw IllegalStateException("تغيّر تنسيق الخرج بعد بدء الـmuxer")
+                        }
                         trackIndex = mux.addTrack(enc.outputFormat)
                         mux.start()
                         muxerStarted = true
                         continue
                     }
                     if (outIndex < 0) continue
-                    val encoded = enc.getOutputBuffer(outIndex) ?: continue
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                        bufferInfo.size = 0
+                    try {
+                        val encoded = enc.getOutputBuffer(outIndex)
+                        if (encoded != null) {
+                            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                                bufferInfo.size = 0
+                            }
+                            if (bufferInfo.size > 0) {
+                                if (!muxerStarted) {
+                                    throw IllegalStateException("خرج مشفّر قبل بدء الـmuxer")
+                                }
+                                encoded.position(bufferInfo.offset)
+                                encoded.limit(bufferInfo.offset + bufferInfo.size)
+                                mux.writeSampleData(trackIndex, encoded, bufferInfo)
+                            }
+                        }
+                    } finally {
+                        enc.releaseOutputBuffer(outIndex, false)
                     }
-                    if (bufferInfo.size > 0 && muxerStarted) {
-                        encoded.position(bufferInfo.offset)
-                        encoded.limit(bufferInfo.offset + bufferInfo.size)
-                        mux.writeSampleData(trackIndex, encoded, bufferInfo)
-                    }
-                    enc.releaseOutputBuffer(outIndex, false)
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                 }
             }
 
-            var prevFrame: Bitmap? = null
-            for (bitmap in images) {
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+            val frameDeadlineNs = 1_000_000_000L / fps
+            val startNs = System.nanoTime()
+            var frameIndex = 0
+
+            fun drawFitted(canvas: Canvas, bitmap: Bitmap, zoom: Float, alpha: Int) {
+                val scale = max(
+                    canvas.width.toFloat() / bitmap.width,
+                    canvas.height.toFloat() / bitmap.height
+                ) * zoom
+                val dx = (canvas.width - bitmap.width * scale) / 2f
+                val dy = (canvas.height - bitmap.height * scale) / 2f
+                paint.alpha = alpha.coerceIn(0, 255)
+                canvas.save()
+                canvas.translate(dx, dy)
+                canvas.scale(scale, scale)
+                canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                canvas.restore()
+            }
+
+            for ((imageIndex, bitmap) in images.withIndex()) {
                 for (f in 0 until framesPerImage) {
-                    val t = f.toFloat() / framesPerImage
-                    val zoom = 1.0f + 0.12f * t
-                    val frame = drawFrame(bitmap, zoom)
-                    val previous = prevFrame
-                    val toEncode = if (previous != null && f < fadeFrames) {
-                        blend(previous, frame, f.toFloat() / fadeFrames.coerceAtLeast(1))
-                    } else {
-                        frame
+                    var canvas: Canvas? = null
+                    try {
+                        canvas = surface.lockCanvas(null)
+                        if (canvas == null) {
+                            throw IllegalStateException("تعذّر الحصول على Canvas من سطح المشفّر")
+                        }
+                        canvas.drawColor(Color.BLACK)
+                        val t = f.toFloat() / framesPerImage
+                        drawFitted(canvas, bitmap, 1.0f + 0.12f * t, 255)
+                        if (imageIndex > 0 && f < fadeFrames && fadeFrames > 0) {
+                            // previous image fades out over the current one
+                            val alpha = ((1f - f.toFloat() / fadeFrames) * 255).toInt()
+                            drawFitted(canvas, images[imageIndex - 1], 1.0f, alpha)
+                        }
+                    } finally {
+                        if (canvas != null) {
+                            try {
+                                surface.unlockCanvasAndPost(canvas)
+                                frameIndex++
+                            } catch (e: Exception) {
+                                throw IllegalStateException(
+                                    "فشل إرسال الإطار إلى المشفّر: ${describeError(e)}"
+                                )
+                            }
+                        }
                     }
-                    if (queueFrame(toEncode, frameIndex * 1_000_000L / fps)) frameIndex++
-                    if (toEncode !== frame) toEncode.recycle()
                     drainEncoder(false)
-                    if (previous != null && previous !== frame) previous.recycle()
-                    prevFrame = frame
+                    val targetNs = startNs + (frameIndex.toLong() * frameDeadlineNs)
+                    val sleepMs = (targetNs - System.nanoTime()) / 1_000_000
+                    if (sleepMs > 0) Thread.sleep(sleepMs)
                 }
             }
-            prevFrame?.recycle()
+            totalFrames = frameIndex
 
             enc.signalEndOfInputStream()
             drainEncoder(true)
 
-            val totalFrames = frameIndex
             return VideoResult(
                 file = outFile,
                 durationMs = totalFrames * 1000 / fps,
@@ -246,6 +254,7 @@ object VideoComposer {
                 height = outHeight
             )
         } finally {
+            try { inputSurface?.release() } catch (_: Exception) {}
             try { encoder?.stop() } catch (_: Exception) {}
             try { encoder?.release() } catch (_: Exception) {}
             try { muxer?.stop() } catch (_: Exception) {}
@@ -253,83 +262,86 @@ object VideoComposer {
         }
     }
 
-    private fun pickColorFormat(encoder: MediaCodec): Int {
-        val formats = runCatching {
-            encoder.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                .colorFormats.toSet()
-        }.getOrNull()
-        return when {
-            formats == null -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar in formats ->
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible in formats ->
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
-            else -> formats.first()
-        }
-    }
-
-    /** Writes Y/U/V into a MediaCodec flexible YUV image, honouring row/pixel strides. */
-    private fun fillImage(image: Image, bitmap: Bitmap) {
-        val w = bitmap.width
-        val h = bitmap.height
-        val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        val planes = image.planes
-        val yPlane = planes[0]
-        val uPlane = planes[1]
-        val vPlane = planes[2]
-        val yBuffer = yPlane.buffer
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        for (y in 0 until h) {
-            val rowStart = y * w
-            var yIndex = y * yPlane.rowStride
-            for (x in 0 until w) {
-                val p = pixels[rowStart + x]
-                val r = (p shr 16) and 0xFF
-                val g = (p shr 8) and 0xFF
-                val b = p and 0xFF
-                val yv = (0.299f * r + 0.587f * g + 0.114f * b).toInt().coerceIn(0, 255)
-                yBuffer.put(yIndex, yv.toByte())
-                yIndex += yPlane.pixelStride
-                if (y % 2 == 0 && x % 2 == 0) {
-                    val u = ((-0.169f * r - 0.331f * g + 0.5f * b) + 128).toInt().coerceIn(0, 255)
-                    val v = ((0.5f * r - 0.419f * g - 0.081f * b) + 128).toInt().coerceIn(0, 255)
-                    val chromaIndex = (y / 2) * uPlane.rowStride + (x / 2) * uPlane.pixelStride
-                    uBuffer.put(chromaIndex, u.toByte())
-                    vBuffer.put((y / 2) * vPlane.rowStride + (x / 2) * vPlane.pixelStride, v.toByte())
+    /**
+     * Saves the generated bitmaps to the gallery (Pictures/KamalDZStudio).
+     * Used as a fallback when video composition fails so the user still gets output.
+     */
+    fun saveImagesToGallery(context: Context, images: List<Bitmap>): Result<List<Uri>> {
+        return runCatching {
+            images.mapIndexed { index, bitmap ->
+                val name = "KamalDZ_${System.currentTimeMillis()}_${index + 1}.png"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    saveImageMediaStore(context, bitmap, name)
+                } else {
+                    saveImageLegacy(context, bitmap, name)
                 }
             }
         }
     }
 
-    private fun bitmapToNv12(bitmap: Bitmap): ByteArray {
-        val w = bitmap.width
-        val h = bitmap.height
-        val ySize = w * h
-        val out = ByteArray(ySize * 3 / 2)
-        val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        var yi = 0
-        var ui = ySize
-        var vi = ySize + ySize / 4
-        for (y in 0 until h) {
-            for (x in 0 until w) {
-                val p = pixels[y * w + x]
-                val r = (p shr 16) and 0xFF
-                val g = (p shr 8) and 0xFF
-                val b = p and 0xFF
-                val yv = (0.299f * r + 0.587f * g + 0.114f * b).toInt().coerceIn(0, 255)
-                out[yi++] = yv.toByte()
-                if (y % 2 == 0 && x % 2 == 0) {
-                    val u = ((-0.169f * r - 0.331f * g + 0.5f * b) + 128).toInt().coerceIn(0, 255)
-                    val v = ((0.5f * r - 0.419f * g - 0.081f * b) + 128).toInt().coerceIn(0, 255)
-                    out[ui++] = u.toByte()
-                    out[vi++] = v.toByte()
+    /** Keeps the current run's frames in cacheDir so a retry need not regenerate them. */
+    fun cacheRunImages(context: Context, images: List<Bitmap>): List<File> {
+        val dir = File(context.cacheDir, "video_run")
+        if (!dir.exists()) dir.mkdirs()
+        dir.listFiles()?.forEach { it.delete() }
+        val saved = mutableListOf<File>()
+        images.forEachIndexed { index, bitmap ->
+            val file = File(dir, "frame_${index + 1}.png")
+            runCatching {
+                FileOutputStream(file).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
+                saved += file
             }
         }
-        return out
+        return saved
+    }
+
+    private fun saveImageMediaStore(context: Context, bitmap: Bitmap, name: String): Uri {
+        val resolver = context.contentResolver
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/KamalDZStudio")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(collection, values)
+            ?: error("تعذّر إنشاء سجل الصورة في المعرض")
+        try {
+            val out = resolver.openOutputStream(uri)
+                ?: error("تعذّر فتح ملف المعرض للكتابة")
+            out.use { os ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)) {
+                    error("فشل ترميز الصورة PNG")
+                }
+            }
+            val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+            return uri
+        } catch (e: Exception) {
+            runCatching { resolver.delete(uri, null, null) }
+            throw e
+        }
+    }
+
+    private fun saveImageLegacy(context: Context, bitmap: Bitmap, name: String): Uri {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "KamalDZStudio"
+        )
+        if (!dir.exists()) dir.mkdirs()
+        val target = File(dir, name)
+        FileOutputStream(target).use { out ->
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                error("فشل ترميز الصورة PNG")
+            }
+        }
+        context.sendBroadcast(
+            android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                .setData(Uri.fromFile(target))
+        )
+        return Uri.fromFile(target)
     }
 
     /**

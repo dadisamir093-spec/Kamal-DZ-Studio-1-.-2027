@@ -408,6 +408,9 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                     images.add(bmp)
                 }
 
+                // Keep this run's frames in cacheDir so a retry does not regenerate them.
+                runCatching { com.example.video.VideoComposer.cacheRunImages(app, images) }
+
                 setState { it.copy(statusMessage = "تركيب الفيديو محلياً (${images.size} صور)...", progress = 0.9f) }
                 val video = com.example.video.VideoComposer.compose(
                     context = app,
@@ -416,8 +419,24 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 val vr = video.getOrNull() ?: run {
                     val e = video.exceptionOrNull()
-                    val err = e?.let { "${it.javaClass.simpleName}: ${it.localizedMessage ?: ""}" } ?: "خطأ غير معروف"
-                    setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ فشل تركيب الفيديو: $err") }
+                    val err = e?.let { com.example.video.VideoComposer.describeError(it) } ?: "خطأ غير معروف"
+                    val saved = com.example.video.VideoComposer.saveImagesToGallery(app, images)
+                    val savedUris = saved.getOrNull()
+                    setState {
+                        it.copy(
+                            isGenerating = false,
+                            progress = 0f,
+                            hasResult = !savedUris.isNullOrEmpty(),
+                            resultImageFile = savedUris?.firstOrNull()?.toString() ?: it.resultImageFile,
+                            statusMessage = if (!savedUris.isNullOrEmpty()) {
+                                "⚠️ تعذر تركيب الفيديو ($err)\nتعذر تركيب الفيديو، تم حفظ الصور الأربع في المعرض"
+                            } else {
+                                "⚠️ تعذر تركيب الفيديو ($err) وتعذر حفظ الصور: ${saved.exceptionOrNull()?.let { err2 -> com.example.video.VideoComposer.describeError(err2) } ?: ""}"
+                            }
+                        )
+                    }
+                    images.forEach { it.recycle() }
+                    images.clear()
                     fetchDailyQuota()
                     return@launch
                 }
@@ -430,7 +449,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(
                             isGenerating = false,
                             progress = 0f,
-                            statusMessage = "⚠️ فشل حفظ الفيديو في المعرض: ${e.javaClass.simpleName}: ${e.localizedMessage ?: ""}"
+                            statusMessage = "⚠️ فشل حفظ الفيديو في المعرض: ${com.example.video.VideoComposer.describeError(e)}"
                         )
                     }
                     fetchDailyQuota()
@@ -465,7 +484,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 throw e
             } catch (e: Exception) {
                 images.forEach { it.recycle() }
-                setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ خطأ في وضع نص إلى فيديو: ${e.javaClass.simpleName}: ${e.localizedMessage ?: ""}") }
+                setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ خطأ في وضع نص إلى فيديو: ${com.example.video.VideoComposer.describeError(e)}") }
                 fetchDailyQuota()
             }
         }

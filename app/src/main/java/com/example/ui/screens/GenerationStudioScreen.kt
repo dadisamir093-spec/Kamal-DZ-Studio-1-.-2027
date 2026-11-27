@@ -275,9 +275,7 @@ fun GenerationStudioScreen(
             val resultUri = currentSlot.resultImageFile
             val isVideoResult = resultUri != null && (
                 resultUri.endsWith(".mp4", ignoreCase = true) ||
-                    resultUri.contains("/video/") ||
-                    currentSlot.mode == "نص إلى فيديو" ||
-                    currentSlot.mode == "صورة إلى فيديو"
+                    resultUri.contains("/video/")
                 )
             if (resultUri != null) {
                 if (isVideoResult) {
@@ -384,8 +382,10 @@ fun GenerationStudioScreen(
         }
 
         if (currentSlot.hasResult && currentSlot.resultImageFile != null) {
+            val resultUriNow = currentSlot.resultImageFile!!
+            val resultIsContent = resultUriNow.startsWith("content://")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!currentResultIsVideo) {
+                if (!currentResultIsVideo && !resultIsContent) {
                     Button(
                         onClick = {
                             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
@@ -399,19 +399,24 @@ fun GenerationStudioScreen(
                 }
                 Button(
                     onClick = {
-                        if (currentResultIsVideo) {
+                        if (resultIsContent) {
                             val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                type = "video/mp4"
-                                putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.parse(currentSlot.resultImageFile))
+                                type = if (currentResultIsVideo) "video/mp4" else "image/png"
+                                putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.parse(resultUriNow))
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             runCatching {
-                                context.startActivity(android.content.Intent.createChooser(send, "مشاركة الفيديو"))
+                                context.startActivity(
+                                    android.content.Intent.createChooser(
+                                        send,
+                                        if (currentResultIsVideo) "مشاركة الفيديو" else "مشاركة الصورة"
+                                    )
+                                )
                             }.onFailure {
                                 exportMessage = "❌ فشلت المشاركة: ${it.message ?: it.javaClass.simpleName}"
                             }
                         } else {
-                            ImageExport.share(context, java.io.File(currentSlot.resultImageFile!!)).onFailure {
+                            ImageExport.share(context, java.io.File(resultUriNow)).onFailure {
                                 exportMessage = "❌ فشلت المشاركة: ${it.message ?: it.javaClass.simpleName}"
                             }
                         }
