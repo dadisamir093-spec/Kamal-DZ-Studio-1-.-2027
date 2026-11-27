@@ -762,9 +762,19 @@ fun GenerationStudioScreen(
             )
         }
 
+        var diagClicks by remember { mutableStateOf(0) }
+        Text(
+            text = "DIAG mode=${currentSlot.mode} gen=${currentSlot.isGenerating} clicks=$diagClicks",
+            fontSize = 11.sp,
+            color = CyanAccent
+        )
+
         // Primary Action Button: "✨ إنشاء الآن" (matches screenshot)
         Button(
-            onClick = { viewModel.startGeneration() },
+            onClick = {
+                diagClicks++
+                viewModel.startGeneration()
+            },
             enabled = !currentSlot.isGenerating && (currentSlot.mode == "توليد الصور" || currentSlot.mode == "نص إلى فيديو"),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ElectricBlue,
