@@ -92,6 +92,9 @@ fun GenerationStudioScreen(
     val slot1 by viewModel.slot1State.collectAsState()
     val slot2 by viewModel.slot2State.collectAsState()
     val currentSlot = if (activeSlot == 1) slot1 else slot2
+    val currentResultUri = currentSlot.resultImageFile
+    val currentResultIsVideo = currentResultUri != null &&
+        (currentResultUri.endsWith(".mp4", ignoreCase = true) || currentResultUri.contains("/video/"))
     val scriptLanguage by viewModel.scriptLanguage.collectAsState()
     val selectedCharCat by viewModel.selectedCharacterCategory.collectAsState()
     val genQuality by viewModel.generationQuality.collectAsState()
@@ -270,9 +273,13 @@ fun GenerationStudioScreen(
                 .testTag("generation_hero_preview")
         ) {
             val resultUri = currentSlot.resultImageFile
+            val isVideoResult = resultUri != null && (
+                resultUri.endsWith(".mp4", ignoreCase = true) ||
+                    resultUri.contains("/video/") ||
+                    currentSlot.mode == "نص إلى فيديو" ||
+                    currentSlot.mode == "صورة إلى فيديو"
+                )
             if (resultUri != null) {
-                val isVideoResult = resultUri.endsWith(".mp4", ignoreCase = true) ||
-                    currentSlot.mode == "نص إلى فيديو"
                 if (isVideoResult) {
                     VideoResultPlayer(
                         uri = resultUri,
@@ -304,18 +311,20 @@ fun GenerationStudioScreen(
                 }
             }
 
-            // Dark Vignette Overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color(0x99070B18))
+            // Dark Vignette Overlay (skipped for video so the clip stays clear and tappable)
+            if (!isVideoResult) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color(0x99070B18))
+                            )
                         )
-                    )
-            )
+                )
+            }
 
-            if (currentSlot.mode != "توليد الصور") {
+            if (!isVideoResult && currentSlot.mode != "توليد الصور") {
             // Play Button Overlay
             Box(
                 modifier = Modifier
@@ -376,20 +385,35 @@ fun GenerationStudioScreen(
 
         if (currentSlot.hasResult && currentSlot.resultImageFile != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!currentResultIsVideo) {
+                    Button(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                                    != PackageManager.PERMISSION_GRANTED
+                            ) storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            else saveNow()
+                        },
+                        modifier = Modifier.weight(1f).testTag("save_to_gallery_button")
+                    ) { Text("💾 حفظ في المعرض", fontSize = 12.sp) }
+                }
                 Button(
                     onClick = {
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-                            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                                != PackageManager.PERMISSION_GRANTED
-                        ) storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        else saveNow()
-                    },
-                    modifier = Modifier.weight(1f).testTag("save_to_gallery_button")
-                ) { Text("💾 حفظ في المعرض", fontSize = 12.sp) }
-                Button(
-                    onClick = {
-                        ImageExport.share(context, java.io.File(currentSlot.resultImageFile!!)).onFailure {
-                            exportMessage = "❌ فشلت المشاركة: ${it.message ?: it.javaClass.simpleName}"
+                        if (currentResultIsVideo) {
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "video/mp4"
+                                putExtra(android.content.Intent.EXTRA_STREAM, android.net.Uri.parse(currentSlot.resultImageFile))
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            runCatching {
+                                context.startActivity(android.content.Intent.createChooser(send, "مشاركة الفيديو"))
+                            }.onFailure {
+                                exportMessage = "❌ فشلت المشاركة: ${it.message ?: it.javaClass.simpleName}"
+                            }
+                        } else {
+                            ImageExport.share(context, java.io.File(currentSlot.resultImageFile!!)).onFailure {
+                                exportMessage = "❌ فشلت المشاركة: ${it.message ?: it.javaClass.simpleName}"
+                            }
                         }
                     },
                     modifier = Modifier.weight(1f).testTag("share_image_button")
@@ -745,7 +769,7 @@ fun GenerationStudioScreen(
             }
         }
 
-        if (!currentSlot.isGenerating && currentSlot.statusMessage.startsWith("❌")) {
+        if (!currentSlot.isGenerating && currentSlot.statusMessage.isNotBlank()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -777,7 +801,7 @@ fun GenerationStudioScreen(
 
         var diagClicks by remember { mutableStateOf(0) }
         Text(
-            text = "DIAG mode=${currentSlot.mode} gen=${currentSlot.isGenerating} clicks=$diagClicks",
+            text = "DIAG mode=${currentSlot.mode} gen=${currentSlot.isGenerating} hasResult=${currentSlot.hasResult} uri=${currentSlot.resultImageFile?.takeLast(28)} clicks=$diagClicks\nDIAG status=${currentSlot.statusMessage.takeLast(70)}",
             fontSize = 11.sp,
             color = CyanAccent
         )

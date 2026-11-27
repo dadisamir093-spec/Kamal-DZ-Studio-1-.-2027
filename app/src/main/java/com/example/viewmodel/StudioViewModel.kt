@@ -409,9 +409,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 setState { it.copy(statusMessage = "تركيب الفيديو محلياً (${images.size} صور)...", progress = 0.9f) }
-                val video = com.example.video.VideoComposer.compose(app, images)
+                val video = com.example.video.VideoComposer.compose(
+                    context = app,
+                    images = images,
+                    aspectRatio = currentSlot.aspectRatio
+                )
                 val vr = video.getOrNull() ?: run {
-                    val err = video.exceptionOrNull()?.localizedMessage ?: "خطأ غير معروف"
+                    val e = video.exceptionOrNull()
+                    val err = e?.let { "${it.javaClass.simpleName}: ${it.localizedMessage ?: ""}" } ?: "خطأ غير معروف"
                     setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ فشل تركيب الفيديو: $err") }
                     fetchDailyQuota()
                     return@launch
@@ -419,14 +424,25 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 images.forEach { it.recycle() }
                 images.clear()
 
-                val uri = com.example.video.VideoComposer.registerInMediaStore(app, vr.file)
-                val msg = "🎬 تم إنشاء الفيديو (${vr.durationMs / 1000} ثانية، ${vr.frameCount} إطاراً) وحفظه في Movies/KamalDZStudio"
+                val published = com.example.video.VideoComposer.registerInMediaStore(app, vr.file)
+                val uri = published.getOrElse { e ->
+                    setState {
+                        it.copy(
+                            isGenerating = false,
+                            progress = 0f,
+                            statusMessage = "⚠️ فشل حفظ الفيديو في المعرض: ${e.javaClass.simpleName}: ${e.localizedMessage ?: ""}"
+                        )
+                    }
+                    fetchDailyQuota()
+                    return@launch
+                }
+                val msg = "🎬 تم إنشاء الفيديو (${vr.durationMs / 1000} ثانية، ${vr.frameCount} إطاراً، ${vr.width}x${vr.height}) وحفظه في Movies/KamalDZStudio"
                 setState {
                     it.copy(
                         isGenerating = false,
                         progress = 1.0f,
                         hasResult = true,
-                        resultImageFile = uri?.toString(),
+                        resultImageFile = uri.toString(),
                         statusMessage = msg
                     )
                 }
@@ -435,11 +451,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         title = "نص إلى فيديو - ${currentSlot.cameraMovement}",
                         description = currentSlot.prompt,
                         durationText = "00:%02d".format(vr.durationMs / 1000),
-                        resolution = "576p",
+                        resolution = "${vr.height}p",
                         aspectRatio = currentSlot.aspectRatio,
                         fps = 30,
                         category = "نص إلى فيديو",
-                        thumbnailUri = uri?.toString(),
+                        thumbnailUri = uri.toString(),
                         thumbnailResId = R.drawable.img_cinematic_hero
                     )
                 )
@@ -449,7 +465,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 throw e
             } catch (e: Exception) {
                 images.forEach { it.recycle() }
-                setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ خطأ في وضع نص إلى فيديو: ${e.localizedMessage ?: e.javaClass.simpleName}") }
+                setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ خطأ في وضع نص إلى فيديو: ${e.javaClass.simpleName}: ${e.localizedMessage ?: ""}") }
                 fetchDailyQuota()
             }
         }
