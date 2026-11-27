@@ -373,6 +373,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             val estimatedCost = perImageCost * imageCount
             if (quota != null && quota.remainingNeurons < estimatedCost) {
                 setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ الحصة المتبقية (${quota.remainingNeurons} Neuron) لا تكفي للتوليد المتوقع (~$estimatedCost Neuron لـ $imageCount صور). حاول غداً أو قلّل العدد.") }
+                fetchDailyQuota()
                 return@launch
             }
             val costNote = quota?.let { "الحصة المتبقية: ${it.remainingNeurons} Neuron، التكلفة المتوقعة: ~$estimatedCost Neuron." } ?: "تعذر جلب الحصة - سيتم التوليد والتحقق من الاستجابة."
@@ -395,11 +396,13 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         ?: run {
                             val err = result.exceptionOrNull()?.localizedMessage ?: "خطأ غير معروف"
                             setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ توقّف التوليد عند الصورة $i: $err") }
+                            fetchDailyQuota()
                             return@launch
                         }
                     val bmp = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                     if (bmp == null) {
                         setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ تعذر قراءة الصورة $i") }
+                        fetchDailyQuota()
                         return@launch
                     }
                     images.add(bmp)
@@ -410,6 +413,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                 val vr = video.getOrNull() ?: run {
                     val err = video.exceptionOrNull()?.localizedMessage ?: "خطأ غير معروف"
                     setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ فشل تركيب الفيديو: $err") }
+                    fetchDailyQuota()
                     return@launch
                 }
                 images.forEach { it.recycle() }
@@ -439,12 +443,14 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
                         thumbnailResId = R.drawable.img_cinematic_hero
                     )
                 )
+                fetchDailyQuota()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 images.forEach { it.recycle() }
                 throw e
             } catch (e: Exception) {
                 images.forEach { it.recycle() }
                 setState { it.copy(isGenerating = false, progress = 0f, statusMessage = "⚠️ خطأ في وضع نص إلى فيديو: ${e.localizedMessage ?: e.javaClass.simpleName}") }
+                fetchDailyQuota()
             }
         }
     }

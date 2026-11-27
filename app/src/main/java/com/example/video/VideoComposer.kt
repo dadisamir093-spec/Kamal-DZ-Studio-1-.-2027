@@ -1,5 +1,6 @@
 package com.example.video
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -9,6 +10,9 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -42,13 +46,10 @@ object VideoComposer {
             val fadeFrames = minOf(framesPerImage / 4, fps)
             val totalFrames = framesPerImage * images.size
 
-            val moviesDir = java.io.File(
-                android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_MOVIES
-                ), "KamalDZStudio"
-            )
-            if (!moviesDir.exists()) moviesDir.mkdirs()
-            val outFile = java.io.File(moviesDir, "KamalDZ_video_${System.currentTimeMillis()}.mp4")
+            // يُكتب الملف مؤقتاً في ذاكرة التطبيق ثم يُنشر عبر MediaStore (Android 10+)
+            val buildDir = java.io.File(context.cacheDir, "video_build")
+            if (!buildDir.exists()) buildDir.mkdirs()
+            val outFile = java.io.File(buildDir, "KamalDZ_video_${System.currentTimeMillis()}.mp4")
 
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outWidth, outHeight).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
@@ -191,15 +192,63 @@ object VideoComposer {
         return out
     }
 
-    /** MediaScanner registration so the clip shows up in gallery/library apps. */
+    /**
+     * Publishes the composed clip so it is visible in gallery/library apps.
+     * Android 10+ writes through MediaStore (scoped storage); Android 9 and
+     * below keeps the legacy direct file in Movies/KamalDZStudio.
+     */
     fun registerInMediaStore(context: Context, file: File): Uri? {
         return try {
-            val mediaScanIntent = android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-            mediaScanIntent.data = Uri.fromFile(file)
-            context.sendBroadcast(mediaScanIntent)
-            Uri.fromFile(file)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                publishViaMediaStore(context, file)
+            } else {
+                publishLegacy(context, file)
+            }
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun publishViaMediaStore(context: Context, file: File): Uri {
+        val resolver = context.contentResolver
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/KamalDZStudio")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(collection, values)
+            ?: error("تعذّر إنشاء سجل الفيديو في المعرض")
+        try {
+            val out = resolver.openOutputStream(uri)
+                ?: error("تعذّر فتح ملف المعرض للكتابة")
+            out.use { os -> file.inputStream().use { it.copyTo(os) } }
+            val done = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+            file.delete()
+            return uri
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
+    private fun publishLegacy(context: Context, file: File): Uri {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
+            "KamalDZStudio"
+        )
+        if (!dir.exists()) dir.mkdirs()
+        val target = File(dir, file.name)
+        if (file.absolutePath != target.absolutePath) {
+            file.copyTo(target, overwrite = true)
+            file.delete()
+        }
+        context.sendBroadcast(
+            android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
+                .setData(Uri.fromFile(target))
+        )
+        return Uri.fromFile(target)
     }
 }

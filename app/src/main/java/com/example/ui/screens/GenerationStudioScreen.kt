@@ -3,12 +3,15 @@ package com.example.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.core.content.ContextCompat
 import com.example.util.ImageExport
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -266,13 +269,23 @@ fun GenerationStudioScreen(
                 .background(SecondaryPanels)
                 .testTag("generation_hero_preview")
         ) {
-            if (currentSlot.resultImageFile != null) {
-                AsyncImage(
-                    model = currentSlot.resultImageFile,
-                    contentDescription = "معاينة التوليد السينمائي",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+            val resultUri = currentSlot.resultImageFile
+            if (resultUri != null) {
+                val isVideoResult = resultUri.endsWith(".mp4", ignoreCase = true) ||
+                    currentSlot.mode == "نص إلى فيديو"
+                if (isVideoResult) {
+                    VideoResultPlayer(
+                        uri = resultUri,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    AsyncImage(
+                        model = resultUri,
+                        contentDescription = "معاينة التوليد السينمائي",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             } else if (currentSlot.resultImageRes != null) {
                 Image(
                     painter = painterResource(id = currentSlot.resultImageRes),
@@ -801,4 +814,31 @@ fun GenerationStudioScreen(
             )
         }
     }
+}
+
+@Composable
+private fun VideoResultPlayer(uri: String, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    AndroidView(
+        modifier = modifier.background(Color.Black),
+        factory = {
+            VideoView(context).apply {
+                tag = uri
+                val controller = MediaController(context)
+                controller.setAnchorView(this)
+                setMediaController(controller)
+                setOnPreparedListener { mp ->
+                    mp.isLooping = true
+                    start()
+                }
+                setVideoURI(android.net.Uri.parse(uri))
+            }
+        },
+        update = { view ->
+            if (view.tag != uri) {
+                view.tag = uri
+                view.setVideoURI(android.net.Uri.parse(uri))
+            }
+        }
+    )
 }
