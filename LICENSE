@@ -1,0 +1,40 @@
+# KAMAL DZ STUDIO 2027
+
+KAMAL DZ STUDIO 2027 is an open-source Android AI creative studio that brings multiple AI-powered creative workflows into one application with an Arabic RTL interface.
+
+## Features
+
+- Generation Studio — AI image and creative generation workflows
+- Character Studio — character creation and consistency workflows
+- Voice Studio — voice and audio workflows
+- Music Studio — AI music creation
+- Editing/Montage Studio — video editing and montage workflows
+- Library Studio — projects and media management
+- Export Studio — export and delivery workflows
+- Arabic RTL interface
+- Firebase App Check and security protections
+- Server-side AI processing architecture designed to keep provider secrets out of the Android client
+
+## Build and Run
+
+1. Clone or download the repository.
+2. Open the Android project in Android Studio.
+3. Allow Gradle to synchronize the project.
+4. Configure the required Firebase project and Android configuration.
+5. Build and run the application on a compatible Android device or emulator.
+
+Project-specific development and preservation rules are documented in `AGENTS.md`.
+
+## Project Status
+
+KAMAL DZ STUDIO 2027 is actively developed as an open-source Android AI creative studio.
+
+## Security
+
+API keys, provider secrets, private tokens, signing keys, and other sensitive credentials must not be placed inside the Android APK or client-side source code.
+
+Security controls such as Firebase App Check, authentication, authorization, quotas, and server-side protections should be preserved.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE` for details.
